@@ -1,36 +1,26 @@
 #ToDo: Ensure to always get the SN as it is used in HA discovery!
 
-import paho.mqtt.client as mqtt
 import socket
 import time
 import yaml
 import os
-import json
 import serial
-import io
 import json
-import atexit
 import sys
 import constants
-
-#print("Starting up...")
 
 config = {}
 
 if os.path.exists('/data/options.json'):
-    #print("Loading options.json")
     with open(r'/data/options.json') as file:
         config = json.load(file)
-        #print("Config: " + json.dumps(config))
 
 elif os.path.exists('config.yaml'):
-    #print("Loading config.yaml")
     with open(r'config.yaml') as file:
         config = yaml.load(file, Loader=yaml.FullLoader)['options']
 
 else:
     sys.exit("No config file found")
-
 
 scan_interval = config['scan_interval']
 connection_type = config['connection_type']
@@ -49,17 +39,14 @@ pack_sn = ''
 packs = 1
 cells = 13
 temps = 6
-
-# print("Connection Type: " + connection_type)
+inc_data = ''
 
 
 def bms_connect(address, port):
     if connection_type == "Serial":
 
         try:
-            # print("trying to connect %s" % bms_serial)
             s = serial.Serial(bms_serial, timeout=1)
-            # print("BMS serial connected")
             return s, True
         except IOError as msg:
             output['errors'].append("BMS serial error connecting: %s" % msg)
@@ -68,11 +55,9 @@ def bms_connect(address, port):
     else:
 
         try:
-            #print("trying to connect " + address + ":" + str(port))
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             s.settimeout(2)
             s.connect((address, port))
-            #print("BMS socket connected")
             return s, True
         except OSError as msg:
             output['errors'].append("BMS socket error connecting: %s" % msg)
@@ -89,7 +74,6 @@ def bms_sendData(comms, request=''):
                 return True
         except IOError as e:
             output['errors'].append("BMS serial error: %s" % e)
-            # global bms_connected
             return False
 
     else:
@@ -101,19 +85,17 @@ def bms_sendData(comms, request=''):
                 return True
         except Exception as e:
             output['errors'].append("BMS socket error: %s" % e)
-            # print("BMS socket error: %s" % e)
-            # global bms_connected
             return False
 
 
 def bms_get_data(comms):
+    global inc_data
     try:
         if connection_type == "Serial":
             inc_data = comms.readline()
         else:
             temp = comms.recv(4096)
             temp2 = temp.split(b'\r')
-            # Decide which one to take:
             for element in range(0, len(temp2)):
                 SOI = hex(ord(temp2[element][0:1]))
                 if SOI == '0x7e':
@@ -126,8 +108,8 @@ def bms_get_data(comms):
         return inc_data
     except Exception as e:
         output['errors'].append("BMS socket receive error: %s" % e)
-        # global bms_connected
         return False
+
 
 def chksum_calc(data):
     global debug_output
@@ -162,7 +144,6 @@ def chksum_calc(data):
 
 
 def cid2_rtn(rtn):
-    # RTN Reponse codes, looking for errors
     if rtn == b'00':
         return False, False
     elif rtn == b'01':
@@ -186,14 +167,12 @@ def cid2_rtn(rtn):
 def bms_parse_data(inc_data):
     global debug_output
 
-    #inc_data = b'~2501460070DC00020D100A0FF40FEA100E10040FF50FFD10010FFD0FE50FF5100A1001060BD20BD20BD40BD40BF80C1AFF7ECFCF258B02271001372710600D0FFA0FFC0FFB0FFC0FFE0FFB0FFA0FFA0FFB0FFD0FFC0FFB0FFB060BEF0BF10BEF0BED0BF70C04FDB1D02E29A9022AF80\r'
-
     try:
 
         SOI = hex(ord(inc_data[0:1]))
         if SOI != '0x7e':
             output['errors'].append("Incorrect starting byte for incoming data")
-            return (False, "Incorrect starting byte for incoming data")
+            return False, "Incorrect starting byte for incoming data"
 
         if debug_output > 1:
             print("SOI: ", SOI)
@@ -219,13 +198,13 @@ def bms_parse_data(inc_data):
 
         calc_LCHKSUM = lchksum_calc(inc_data[10:13])
         if calc_LCHKSUM == False:
-            return (False, "Error calculating LCHKSUM for incoming data")
+            return False, "Error calculating LCHKSUM for incoming data"
 
         if LCHKSUM != ord(calc_LCHKSUM):
             if debug_output > 0:
                 print("LCHKSUM received: " + str(LCHKSUM) + " does not match calculated: " + str(ord(calc_LCHKSUM)))
             return (
-            False, "LCHKSUM received: " + str(LCHKSUM) + " does not match calculated: " + str(ord(calc_LCHKSUM)))
+                False, "LCHKSUM received: " + str(LCHKSUM) + " does not match calculated: " + str(ord(calc_LCHKSUM)))
 
         if debug_output > 1:
             print(" - LENID (int): ", LENID)
@@ -239,7 +218,6 @@ def bms_parse_data(inc_data):
 
         if debug_output > 1:
             print("CHKSUM: ", CHKSUM)
-            #print("EOI: ", hex(inc_data[13+LENID+4]))
 
         calc_CHKSUM = chksum_calc(inc_data[:len(inc_data) - 5])
 
@@ -248,15 +226,15 @@ def bms_parse_data(inc_data):
     except Exception as e:
         if debug_output > 0:
             print("Error1 calculating CHKSUM using data: ", inc_data)
-        return (False, "Error1 calculating CHKSUM: " + str(e))
+        return False, "Error1 calculating CHKSUM: " + str(e)
 
     if calc_CHKSUM == False:
         if debug_output > 0:
             print("Error2 calculating CHKSUM using data: ", inc_data)
-        return (False, "Error2 calculating CHKSUM")
+        return False, "Error2 calculating CHKSUM"
 
     if CHKSUM.decode("ASCII") == calc_CHKSUM:
-        return (True, INFO)
+        return True, INFO
     else:
         if debug_output > 0:
             print("Received and calculated CHKSUM does not match: Received: " + CHKSUM.decode(
@@ -274,8 +252,7 @@ def bms_parse_data(inc_data):
             print(" - LENID (int): ", int(inc_data[10:13], 16))
             print("INFO: ", INFO)
             print("CHKSUM: ", CHKSUM)
-            #print("EOI: ", hex(inc_data[13+LENID+4]))
-        return (False, "Checksum error")
+        return False, "Checksum error"
 
 
 def lchksum_calc(lenid):
@@ -307,15 +284,15 @@ def lchksum_calc(lenid):
 
     except:
         output['errors'].append("Error calculating LCHKSUM using LENID: %s" % lenid)
-        # print("Error calculating LCHKSUM using LENID: ", lenid)
         return (False)
 
-    return (chksum)
+    return chksum
 
 
 def bms_request(bms, ver=b"\x32\x35", adr=b"\x30\x31", cid1=b"\x34\x36", cid2=b"\x43\x31", info=b"", LENID=False):
     global bms_connected
     global debug_output
+    global inc_data
 
     request = b'\x7e'
     request += ver
@@ -325,24 +302,20 @@ def bms_request(bms, ver=b"\x32\x35", adr=b"\x30\x31", cid1=b"\x34\x36", cid2=b"
 
     if not (LENID):
         LENID = len(info)
-        #print("Length: ", LENID)
         LENID = bytes(format(LENID, '03X'), "ASCII")
-
-    #print("LENID: ", LENID)
 
     if LENID == b'000':
         LCHKSUM = '0'
     else:
         LCHKSUM = lchksum_calc(LENID)
         if LCHKSUM == False:
-            return (False, "Error calculating LCHKSUM)")
-    #print("LCHKSUM: ", LCHKSUM)
+            return False, "Error calculating LCHKSUM)"
     request += bytes(LCHKSUM, "ASCII")
     request += LENID
     request += info
     CHKSUM = bytes(chksum_calc(request), "ASCII")
     if CHKSUM == False:
-        return (False, "Error calculating CHKSUM)")
+        return False, "Error calculating CHKSUM)"
     request += CHKSUM
     request += b'\x0d'
 
@@ -352,14 +325,13 @@ def bms_request(bms, ver=b"\x32\x35", adr=b"\x30\x31", cid1=b"\x34\x36", cid2=b"
     if not bms_sendData(bms, request):
         bms_connected = False
         output['errors'].append("Error sending data to BMS")
-        # print("Error, connection to BMS lost")
-        return (False, "Error, connection to BMS lost")
+        return False, "Error, connection to BMS lost"
 
     inc_data = bms_get_data(bms)
 
-    if inc_data == False:
+    if not inc_data:
         output['errors'].append("Error retrieving data from BMS")
-        return (False, "Error retrieving data from BMS")
+        return False, "Error retrieving data from BMS"
 
     if debug_output > 2:
         print("<- Incoming data: ", inc_data)
@@ -379,8 +351,7 @@ def bms_getPackNumber(bms):
         packNumber = int(INFO, 16)
     except:
         output['errors'].append("Error extracting total battery count in pack")
-        #print("Error extracting total battery count in pack")
-        return (False, "Error extracting total battery count in pack")
+        return False, "Error extracting total battery count in pack"
 
     return (success, packNumber)
 
@@ -396,12 +367,11 @@ def bms_getVersion(comms):
     try:
 
         bms_version = bytes.fromhex(INFO.decode("ascii")).decode("ASCII")
-        output['bms_version'] = bms_version
-        # print("BMS Version: " + bms_version)
+        output['bms_version'] = str(bms_version).rstrip()
     except:
-        return (False, "Error extracting BMS version")
+        return False, "Error extracting BMS version"
 
-    return (success, bms_version)
+    return success, bms_version
 
 
 def bms_getSerial(comms):
@@ -412,18 +382,18 @@ def bms_getSerial(comms):
 
     if success == False:
         output['error'] = INFO
-        return (False, INFO, False)
+        return False, INFO, False
 
     try:
         bms_sn = bytes.fromhex(INFO[0:30].decode("ascii")).decode("ASCII")
         pack_sn = bytes.fromhex(INFO[40:68].decode("ascii")).decode("ASCII")
-        output['bms_sn'] = bms_sn
-        output['pack_sn'] = pack_sn
+        output['bms_sn'] = str(bms_sn).strip()
+        output['pack_sn'] = str(pack_sn).strip()
     except:
         output['errors'].append("Error extracting BMS version")
-        return (False, "Error extracting BMS version", False)
+        return False, "Error extracting BMS version", False
 
-    return (success, bms_sn, pack_sn)
+    return success, bms_sn, pack_sn
 
 
 def bms_getAnalogData(bms, batNumber):
@@ -431,6 +401,7 @@ def bms_getAnalogData(bms, batNumber):
     global cells
     global temps
     global packs
+    global inc_data
     byte_index = 2
     i_pack = []
     v_pack = []
@@ -442,12 +413,11 @@ def bms_getAnalogData(bms, batNumber):
     soh = []
 
     battery = bytes(format(batNumber, '02X'), 'ASCII')
-    # print("Get analog info for battery: ", battery)
 
     success, inc_data = bms_request(bms, cid2=constants.cid2PackAnalogData, info=battery)
 
-    if success == False:
-        return (False, inc_data)
+    if not success:
+        return False, inc_data
 
     try:
 
@@ -484,7 +454,7 @@ def bms_getAnalogData(bms, batNumber):
             for i in range(0, cells):
                 v_cell[(p - 1, i)] = int(inc_data[byte_index:byte_index + 4], 16)
                 byte_index += 4
-                output['pack'][p]['cell'][str(i+1)] = str(v_cell[(p - 1, i)])
+                output['pack'][p]['cell'][str(i + 1)] = str(v_cell[(p - 1, i)])
 
             temps = int(inc_data[byte_index:byte_index + 2], 16)
             output['pack'][p]['temps'] = temps
@@ -494,7 +464,7 @@ def bms_getAnalogData(bms, batNumber):
             for i in range(0, temps):  # temps-2
                 t_cell[(p - 1, i)] = (int(inc_data[byte_index:byte_index + 4], 16) - 2730) / 10
                 byte_index += 4
-                output['pack'][p]['temp'][i+1] = t_cell[(p - 1, i)]
+                output['pack'][p]['temp'][i + 1] = t_cell[(p - 1, i)]
 
             i_pack.append(int(inc_data[byte_index:byte_index + 4], 16))
             byte_index += 4
@@ -535,8 +505,7 @@ def bms_getAnalogData(bms, batNumber):
 
     except Exception as e:
         output['errors'].append("Error parsing BMS analog data: %s" % e)
-        #print("Error parsing BMS analog data: ", str(e))
-        return (False, "Error parsing BMS analog data: " + str(e))
+        return False, "Error parsing BMS analog data: " + str(e)
 
     return True, True
 
@@ -544,10 +513,11 @@ def bms_getAnalogData(bms, batNumber):
 def bms_getPackCapacity(bms):
     byte_index = 0
 
-    success, inc_data = bms_request(bms, cid2=constants.cid2PackCapacity)  # Seem to always reply with pack 1 data, even with ADR= 0 or FF and INFO= '' or FF
+    success, inc_data = bms_request(bms,
+                                    cid2=constants.cid2PackCapacity)  # Seem to always reply with pack 1 data, even with ADR= 0 or FF and INFO= '' or FF
 
-    if success == False:
-        return (False, inc_data)
+    if not success:
+        return False, inc_data
 
     try:
 
@@ -583,8 +553,8 @@ def bms_getWarnInfo(bms):
 
     success, inc_data = bms_request(bms, cid2=constants.cid2WarnInfo, info=b'FF')
 
-    if success == False:
-        return (False, inc_data)
+    if not success:
+        return False, inc_data
 
     try:
 
@@ -725,54 +695,32 @@ def bms_getWarnInfo(bms):
     return True, True
 
 
-#print("Connecting to BMS...")
 bms, bms_connected = bms_connect(config['bms_ip'], config['bms_port'])
-
-# client.publish(config['mqtt_base_topic'] + "/availability", "offline")
 
 success, data = bms_getVersion(bms)
 if not success:
     output['errors'].append("Error retrieving BMS version number")
-    #print("Error retrieving BMS version number")
 
 time.sleep(0.1)
 success, bms_sn, pack_sn = bms_getSerial(bms)
 if not success:
     output['errors'].append("Error retrieving BMS and pack serial numbers")
-    #print("Error retrieving BMS and pack serial numbers. This is required for HA Discovery. Exiting...")
     quit()
 
 if bms_connected:
     success, data = bms_getAnalogData(bms, batNumber=255)
     if not success:
         output['errors'].append("Error retrieving BMS analog data: " + data)
-        #print("Error retrieving BMS analog data: " + data)
-    time.sleep(scan_interval / 3)
     success, data = bms_getPackCapacity(bms)
     if not success:
         output['errors'].append("Error retrieving BMS pack capacity: " + data)
-        #print("Error retrieving BMS pack capacity: " + data)
-    time.sleep(scan_interval / 3)
     success, data = bms_getWarnInfo(bms)
     if not success:
         output['errors'].append("Error retrieving BMS warning info: " + data)
-        #print("Error retrieving BMS warning info: " + data)
-    time.sleep(scan_interval / 3)
-
-    # client.publish(config['mqtt_base_topic'] + "/availability", "online")
 
     print(json.dumps(output, indent=2))
 
-    print_initial = False
-
-    repub_discovery += 1
-    if repub_discovery * scan_interval > 3600:
-        repub_discovery = 0
-        print_initial = True
-
-
 else:  #BMS not connected
     output['errors'].append("BMS not connected")
-    #print("BMS disconnected, trying to reconnect...")
     print(json.dumps(output, indent=2))
     bms, bms_connected = bms_connect(config['bms_ip'], config['bms_port'])

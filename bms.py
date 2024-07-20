@@ -1,36 +1,12 @@
-#ToDo: Ensure to always get the SN as it is used in HA discovery!
-
-import socket
 import time
-import yaml
-import os
 import serial
 import json
 import sys
 import constants
 
-config = {}
-
-if os.path.exists('/data/options.json'):
-    with open(r'/data/options.json') as file:
-        config = json.load(file)
-
-elif os.path.exists('config.yaml'):
-    with open(r'config.yaml') as file:
-        config = yaml.load(file, Loader=yaml.FullLoader)['options']
-
-else:
-    sys.exit("No config file found")
-
-scan_interval = config['scan_interval']
-connection_type = config['connection_type']
-bms_serial = config['bms_serial']
-code_running = True
-debug_output = config['debug_output']
-disc_payload = {}
-repub_discovery = 0
-print_initial = True
-
+scan_interval = 1
+bms_serial = sys.argv[1]
+debug_output = 0
 output = {'errors': []}
 
 bms_version = ''
@@ -41,71 +17,30 @@ cells = 13
 temps = 6
 inc_data = ''
 
-
-def bms_connect(address, port):
-    if connection_type == "Serial":
-
-        try:
-            s = serial.Serial(bms_serial, timeout=1)
-            return s, True
-        except IOError as msg:
-            output['errors'].append("BMS serial error connecting: %s" % msg)
-            return False, False
-
-    else:
-
-        try:
-            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            s.settimeout(2)
-            s.connect((address, port))
-            return s, True
-        except OSError as msg:
-            output['errors'].append("BMS socket error connecting: %s" % msg)
-            return False, False
+def bms_connect():
+    try:
+        s = serial.Serial(bms_serial, timeout=1)
+        return s, True
+    except IOError as msg:
+        output['errors'].append("BMS serial error connecting: %s" % msg)
+        return False, False
 
 
 def bms_sendData(comms, request=''):
-    if connection_type == "Serial":
-
-        try:
-            if len(request) > 0:
-                comms.write(request)
-                time.sleep(0.25)
-                return True
-        except IOError as e:
-            output['errors'].append("BMS serial error: %s" % e)
-            return False
-
-    else:
-
-        try:
-            if len(request) > 0:
-                comms.send(request)
-                time.sleep(0.25)
-                return True
-        except Exception as e:
-            output['errors'].append("BMS socket error: %s" % e)
-            return False
+    try:
+        if len(request) > 0:
+            comms.write(request)
+            time.sleep(0.25)
+            return True
+    except IOError as e:
+        output['errors'].append("BMS serial error: %s" % e)
+        return False
 
 
 def bms_get_data(comms):
     global inc_data
     try:
-        if connection_type == "Serial":
-            inc_data = comms.readline()
-        else:
-            temp = comms.recv(4096)
-            temp2 = temp.split(b'\r')
-            for element in range(0, len(temp2)):
-                SOI = hex(ord(temp2[element][0:1]))
-                if SOI == '0x7e':
-                    inc_data = temp2[element] + b'\r'
-                    break
-
-            if (len(temp2) > 2) & (debug_output > 0):
-                print("Multiple EOIs detected")
-                print("...for incoming data: " + str(temp) + " |Hex: " + str(temp.hex(' ')))
-        return inc_data
+        return comms.readline()
     except Exception as e:
         output['errors'].append("BMS socket receive error: %s" % e)
         return False
@@ -284,7 +219,7 @@ def lchksum_calc(lenid):
 
     except:
         output['errors'].append("Error calculating LCHKSUM using LENID: %s" % lenid)
-        return (False)
+        return False
 
     return chksum
 
@@ -344,8 +279,8 @@ def bms_request(bms, ver=b"\x32\x35", adr=b"\x30\x31", cid1=b"\x34\x36", cid2=b"
 def bms_getPackNumber(bms):
     success, INFO = bms_request(bms, cid2=constants.cid2PackNumber)
 
-    if success == False:
-        return (False, INFO)
+    if not success:
+        return False, INFO
 
     try:
         packNumber = int(INFO, 16)
@@ -353,7 +288,7 @@ def bms_getPackNumber(bms):
         output['errors'].append("Error extracting total battery count in pack")
         return False, "Error extracting total battery count in pack"
 
-    return (success, packNumber)
+    return success, packNumber
 
 
 def bms_getVersion(comms):
@@ -361,8 +296,8 @@ def bms_getVersion(comms):
 
     success, INFO = bms_request(bms, cid2=constants.cid2SoftwareVersion)
 
-    if success == False:
-        return (False, INFO)
+    if not success:
+        return False, INFO
 
     try:
 
@@ -380,7 +315,7 @@ def bms_getSerial(comms):
 
     success, INFO = bms_request(bms, cid2=constants.cid2SerialNumber)
 
-    if success == False:
+    if not success:
         output['error'] = INFO
         return False, INFO, False
 
@@ -397,7 +332,6 @@ def bms_getSerial(comms):
 
 
 def bms_getAnalogData(bms, batNumber):
-    global print_initial
     global cells
     global temps
     global packs
@@ -422,8 +356,7 @@ def bms_getAnalogData(bms, batNumber):
     try:
 
         packs = int(inc_data[byte_index:byte_index + 2], 16)
-        if print_initial:
-            output['packs'] = packs
+        output['packs'] = packs
         byte_index += 2
 
         v_cell = {}
@@ -695,7 +628,7 @@ def bms_getWarnInfo(bms):
     return True, True
 
 
-bms, bms_connected = bms_connect(config['bms_ip'], config['bms_port'])
+bms, bms_connected = bms_connect()
 
 success, data = bms_getVersion(bms)
 if not success:
@@ -723,4 +656,4 @@ if bms_connected:
 else:  #BMS not connected
     output['errors'].append("BMS not connected")
     print(json.dumps(output, indent=2))
-    bms, bms_connected = bms_connect(config['bms_ip'], config['bms_port'])
+    bms, bms_connected = bms_connect()

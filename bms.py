@@ -651,9 +651,9 @@ if bms_connected:
     if not success:
         output['errors'].append("Error retrieving BMS warning info: " + data)
 
-    print(json.dumps(output, indent=2))
+    print(json.dumps(output))
 
 else:  #BMS not connected
     output['errors'].append("BMS not connected")
-    print(json.dumps(output, indent=2))
+    print(json.dumps(output))
     bms, bms_connected = bms_connect()

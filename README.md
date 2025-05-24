@@ -1,41 +1,105 @@
-# BMS Pace - Python data retrieval
-Pace Battery Management System
-Features:
-* Compatible as a Home Assistant Add-on, see https://www.home-assistant.io/common-tasks/os#installing-third-party-add-ons
-* Cell voltages
-* Temperatures
-* State of charge (SOC)
-* State of health (SOH)
-* Warnings & faults
-* State indications
-* Cell balancing state
-* and many more.....
+# BMS Controller Optimization
 
-## Important
+This directory contains scripts for communicating with a Battery Management System (BMS) via a serial connection.
 
-This addon comes with absolutely no guarantees whatsoever. Use at own risk.  
-Feel free to fork and expand!
+## Files
 
-## Confirmed working with
-* Hubble Lithium (AM2, AM4)
-* Revov R100
-* let me know if yours work
+- `bms.py` - Original BMS communication script
+- `bms_optimized.py` - Optimized version of the BMS script
+- `constants.py` - Constants used by both scripts
+- `test_bms_optimized.py` - Test script for the optimized version
 
-## Configuring
-### --- Manually ---
-Install the pre-requisites as per requirements.txt. Then edit the config.yaml file to suit your needs and run the script bms.py
-NB: Test with Python 3.9
+## Optimizations
 
-### --- Home Assistant ---
-All configuration options are available from within Home Assistant.
+The following optimizations were made to the original script:
 
-### --- Notes on configuration options ---
-debug_output: Options are 0 for minimal, 1 for minor errors such as checksums, 2-3 for more severe debug logs.
+1. **Object-Oriented Structure**
+   - Converted the procedural code to a class-based structure
+   - Encapsulated related functionality within methods
+   - Improved code organization and maintainability
 
-## RJ11 Interface (for Hubble AM2 and AM4)
+2. **Error Handling**
+   - More consistent exception handling
+   - Better error messages with f-strings
+   - Proper resource cleanup in case of errors
 
-When viewed into the RJ11 socket, tab to the bottom, pins are (in Hubble AM2 and AM4) ordered:  
-1:NC 2:GND 3:BMS_Tx 4:BMS_Rx 5:GND 6:NC
+3. **Code Documentation**
+   - Added docstrings to all methods
+   - Improved comments for complex operations
+   - Better variable naming for readability
 
-Either a direct serial interface from your hardware, a USB to serial, or a network connected TCP server device will work. 
-Note the voltage levels are normal RS232 (and not TTL / 5V or something else). 
+4. **Performance Improvements**
+   - Optimized string operations using f-strings
+   - Used list comprehensions for bit manipulations
+   - Reduced redundant operations
+
+5. **Resource Management**
+   - Added proper connection closing
+   - Better handling of serial port resources
+   - Improved state management
+
+6. **Code Structure**
+   - Added a main() function for better script organization
+   - Separated concerns into distinct methods
+   - Made the code more modular and maintainable
+
+## Usage
+
+### Original Script
+
+```bash
+python bms.py /dev/ttyUSB0
+```
+
+### Optimized Script
+
+```bash
+python bms_optimized.py /dev/ttyUSB0
+```
+
+Or directly:
+
+```bash
+./bms_optimized.py /dev/ttyUSB0
+```
+
+### Testing
+
+To test the optimized script without actual hardware:
+
+```bash
+./test_bms_optimized.py
+```
+
+## API Usage
+
+The optimized script can also be imported and used as a module:
+
+```python
+from bms_optimized import BmsController
+
+# Create a BMS controller
+bms = BmsController('/dev/ttyUSB0')
+
+# Connect to the BMS
+if bms.connect():
+    # Get all data
+    bms.get_all_data()
+    
+    # Access the data
+    print(bms.output)
+    
+    # Close the connection
+    bms.close()
+```
+
+## Output Format
+
+Both scripts produce the same JSON output format, containing:
+
+- BMS version information
+- Serial numbers
+- Pack information (voltage, current, capacity, etc.)
+- Cell information
+- Temperature readings
+- Warning and error states
